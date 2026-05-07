@@ -172,6 +172,57 @@ curl -X POST http://127.0.0.1:8888/api/linkedin/like \
 
 ---
 
+### 5. **LLM ilə LinkedIn Post Yarat**
+
+Verilən mövzuya görə AI/LLM vasitəsilə LinkedIn post mətni yaradın. Bu endpoint LinkedIn-də paylaşım etmir, sadəcə post content generasiya edir.
+
+**Endpoint:**
+```
+POST /api/llm/generate-linkedin-post
+```
+
+**Content-Type:**
+```
+application/json
+```
+
+**Request Body:**
+```json
+{
+  "topic": "AI in business transformation"
+}
+```
+
+**Field-lər:**
+- `topic` - Məcburidir. LinkedIn postunun hansı mövzu haqqında yazılacağını bildirir. Boş string göndərmək olmaz.
+
+**cURL Örneği:**
+```bash
+curl -X POST http://127.0.0.1:8888/api/llm/generate-linkedin-post \
+  -H "Content-Type: application/json" \
+  -d '{
+    "topic": "Generative AI testing startup-lar üçün niyə vacibdir?"
+  }'
+```
+
+**Başarılı Yanıt (201):**
+```json
+{
+  "success": true,
+  "post": "Generated LinkedIn post content...",
+  "message": "LinkedIn post generated successfully",
+  "topic": "Generative AI testing startup-lar üçün niyə vacibdir?"
+}
+```
+
+**Hata Yanıtları:**
+- `400` - `topic` field eksikdir və ya boşdur
+- `503` - Gemini istifadə edilə bilmir. `GEMINI_API_KEY` və `GEMINI_BASE_URL` ayarlarını yoxlayın
+- `502` - LLM post generasiya edə bilmədi
+- `500` - Sunucu hatası
+
+---
+
 ## Kullanım Örnekleri
 
 ### Python ile

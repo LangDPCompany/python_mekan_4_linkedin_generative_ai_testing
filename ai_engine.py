@@ -10,32 +10,47 @@ logger = logging.getLogger(__name__)
 class GeminiEngine:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self.base_url = os.getenv("GEMINI_BASE_URL", "https://api.gemini2.com/v1").rstrip("/")
+        self.base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         self.timeout = int(os.getenv("GEMINI_TIMEOUT", "10"))
-        self._active_model = os.getenv("GEMINI_MODEL", "gemini")
+        self._active_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     def _call(self, prompt: str) -> Optional[str]:
         if not self.api_key:
             logger.warning("GEMINI_API_KEY is not set.")
             return None
-        url = f"{self.base_url}/generate"
+        url = f"{self.base_url}/models/{self._active_model}:generateContent"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-goog-api-key": self.api_key,
             "Content-Type": "application/json"
         }
-        payload = {"prompt": prompt, "max_tokens": 200}
+        payload = {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": prompt}],
+                }
+            ],
+            "generationConfig": {"maxOutputTokens": 300},
+        }
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
-            return resp.json().get("text", "").strip()
+            data = resp.json()
+            parts = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [])
+            )
+            text = "".join(part.get("text", "") for part in parts)
+            return text.strip()
         except requests.exceptions.ConnectionError:
-            logger.error("Gemini 2.0 API not reachable.")
+            logger.error("Gemini API not reachable.")
             return None
         except requests.exceptions.HTTPError as e:
-            logger.error(f"Gemini 2.0 API HTTP {e.response.status_code}: {e.response.text[:300]}")
+            logger.error(f"Gemini API HTTP {e.response.status_code}: {e.response.text[:300]}")
             return None
         except Exception as e:
-            logger.error(f"Gemini 2.0 API call failed: {e}")
+            logger.error(f"Gemini API call failed: {e}")
             return None
 
     def generate_content(self, item: Dict[str, Any]) -> Optional[str]:
@@ -127,8 +142,8 @@ class GeminiEngine:
             logger.warning("Gemini unavailable: GEMINI_API_KEY is not set.")
             return False
         try:
-            url = f"{self.base_url}/status"
-            headers = {"Authorization": f"Bearer {self.api_key}"}
+            url = f"{self.base_url}/models/{self._active_model}"
+            headers = {"x-goog-api-key": self.api_key}
             resp = requests.get(url, headers=headers, timeout=self.timeout)
             return resp.status_code == 200
         except Exception as e:
