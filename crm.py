@@ -64,9 +64,15 @@ class SQLiteCRMDatabase:
                     content TEXT,
                     status TEXT DEFAULT 'pending',
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (lead_id) REFERENCES leads(id)
                 )
             """)
+            review_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(review_queue)").fetchall()
+            }
+            if "updated_at" not in review_columns:
+                conn.execute("ALTER TABLE review_queue ADD COLUMN updated_at TEXT")
             conn.commit()
         logger.info(f"SQLite CRM initialized at {self.db_path}")
 
@@ -137,29 +143,70 @@ class SQLiteCRMDatabase:
             ).fetchone()
             if existing:
                 conn.execute(
-                    "UPDATE review_queue SET content = ?, created_at = ? WHERE id = ?",
+                    "UPDATE review_queue SET content = ?, updated_at = ? WHERE id = ?",
                     (content, _now(), existing["id"]),
                 )
                 queue_id = existing["id"]
             else:
+                now = _now()
                 conn.execute("""
-                    INSERT INTO review_queue (lead_id, action, content, status)
-                    VALUES (?, ?, ?, ?)
-                """, (lead_id, action, content, STATUS_PENDING))
+                    INSERT INTO review_queue (lead_id, action, content, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (lead_id, action, content, STATUS_PENDING, now, now))
                 queue_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.commit()
         return queue_id
 
-    def get_review_queue(self, status: str = STATUS_PENDING) -> List[Dict[str, Any]]:
+    def get_review_queue(self, status: Optional[str] = STATUS_PENDING) -> List[Dict[str, Any]]:
+        status = None if status in (None, "", "all") else status
+        with self._connect() as conn:
+            if status:
+                rows = conn.execute("""
+                    SELECT rq.*, l.text, l.source, l.author, l.url, l.score, l.intent_level
+                    FROM review_queue rq
+                    JOIN leads l ON rq.lead_id = l.id
+                    WHERE rq.status = ?
+                    ORDER BY l.score DESC, rq.created_at DESC
+                """, (status,)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT rq.*, l.text, l.source, l.author, l.url, l.score, l.intent_level
+                    FROM review_queue rq
+                    JOIN leads l ON rq.lead_id = l.id
+                    ORDER BY l.score DESC, rq.created_at DESC
+                """).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_review_queue_item(self, queue_id) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute("""
                 SELECT rq.*, l.text, l.source, l.author, l.url, l.score, l.intent_level
                 FROM review_queue rq
                 JOIN leads l ON rq.lead_id = l.id
-                WHERE rq.status = ?
-                ORDER BY l.score DESC, rq.created_at DESC
-            """, (status,)).fetchall()
-        return [dict(r) for r in rows]
+                WHERE rq.id = ?
+            """, (queue_id,)).fetchall()
+        return dict(rows[0]) if rows else None
+
+    def update_review_queue_item(self, queue_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        allowed = {"action", "content", "status"}
+        clean_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not clean_updates:
+            return self.get_review_queue_item(queue_id)
+        clean_updates["updated_at"] = _now()
+        assignments = ", ".join(f"{key} = ?" for key in clean_updates)
+        params = list(clean_updates.values()) + [queue_id]
+        with self._connect() as conn:
+            cursor = conn.execute(f"UPDATE review_queue SET {assignments} WHERE id = ?", params)
+            conn.commit()
+            if cursor.rowcount == 0:
+                return None
+        return self.get_review_queue_item(queue_id)
+
+    def delete_review_queue_item(self, queue_id) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM review_queue WHERE id = ?", (queue_id,))
+            conn.commit()
+        return cursor.rowcount > 0
 
     def approve_action(self, queue_id):
         self._update_queue_status(queue_id, STATUS_APPROVED)
@@ -188,6 +235,48 @@ class SQLiteCRMDatabase:
             item["platform_metadata"] = json.loads(item["platform_metadata"] or "{}")
             results.append(item)
         return results
+
+    def get_lead(self, lead_id) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["signals"] = json.loads(item["signals"] or "{}")
+        item["platform_metadata"] = json.loads(item["platform_metadata"] or "{}")
+        return item
+
+    def update_lead(self, lead_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        allowed = {
+            "text", "cleaned_text", "source", "author", "url", "timestamp",
+            "score", "intent_level", "is_lead", "signals", "recommended_action",
+            "ai_response", "status", "platform_metadata",
+        }
+        clean_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not clean_updates:
+            return self.get_lead(lead_id)
+        if "signals" in clean_updates and not isinstance(clean_updates["signals"], str):
+            clean_updates["signals"] = json.dumps(clean_updates["signals"])
+        if "platform_metadata" in clean_updates and not isinstance(clean_updates["platform_metadata"], str):
+            clean_updates["platform_metadata"] = json.dumps(clean_updates["platform_metadata"])
+        if "is_lead" in clean_updates:
+            clean_updates["is_lead"] = 1 if clean_updates["is_lead"] else 0
+        clean_updates["updated_at"] = _now()
+        assignments = ", ".join(f"{key} = ?" for key in clean_updates)
+        params = list(clean_updates.values()) + [lead_id]
+        with self._connect() as conn:
+            cursor = conn.execute(f"UPDATE leads SET {assignments} WHERE id = ?", params)
+            conn.commit()
+            if cursor.rowcount == 0:
+                return None
+        return self.get_lead(lead_id)
+
+    def delete_lead(self, lead_id) -> bool:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM review_queue WHERE lead_id = ?", (lead_id,))
+            cursor = conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+            conn.commit()
+        return cursor.rowcount > 0
 
     def get_stats(self) -> Dict[str, Any]:
         with self._connect() as conn:
@@ -326,9 +415,10 @@ class FirebaseCRMDatabase:
         })
         return doc_ref.id
 
-    def get_review_queue(self, status: str = STATUS_PENDING) -> List[Dict[str, Any]]:
+    def get_review_queue(self, status: Optional[str] = STATUS_PENDING) -> List[Dict[str, Any]]:
         rows = []
-        for doc in self.review_queue.where("status", "==", status).stream():
+        stream = self.review_queue.stream() if status in (None, "", "all") else self.review_queue.where("status", "==", status).stream()
+        for doc in stream:
             queue_item = {"id": doc.id, **doc.to_dict()}
             lead_doc = self.leads.document(str(queue_item.get("lead_id"))).get()
             if lead_doc.exists:
@@ -343,6 +433,43 @@ class FirebaseCRMDatabase:
                 })
             rows.append(queue_item)
         return sorted(rows, key=lambda row: (row.get("score", 0), row.get("created_at", "")), reverse=True)
+
+    def get_review_queue_item(self, queue_id) -> Optional[Dict[str, Any]]:
+        doc = self.review_queue.document(str(queue_id)).get()
+        if not doc.exists:
+            return None
+        queue_item = {"id": doc.id, **doc.to_dict()}
+        lead_doc = self.leads.document(str(queue_item.get("lead_id"))).get()
+        if lead_doc.exists:
+            lead = lead_doc.to_dict()
+            queue_item.update({
+                "text": lead.get("text", ""),
+                "source": lead.get("source", ""),
+                "author": lead.get("author", ""),
+                "url": lead.get("url", ""),
+                "score": lead.get("score", 0),
+                "intent_level": lead.get("intent_level", "low"),
+            })
+        return queue_item
+
+    def update_review_queue_item(self, queue_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        allowed = {"action", "content", "status"}
+        clean_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not clean_updates:
+            return self.get_review_queue_item(queue_id)
+        doc_ref = self.review_queue.document(str(queue_id))
+        if not doc_ref.get().exists:
+            return None
+        clean_updates["updated_at"] = _now()
+        doc_ref.set(clean_updates, merge=True)
+        return self.get_review_queue_item(queue_id)
+
+    def delete_review_queue_item(self, queue_id) -> bool:
+        doc_ref = self.review_queue.document(str(queue_id))
+        if not doc_ref.get().exists:
+            return False
+        doc_ref.delete()
+        return True
 
     def approve_action(self, queue_id):
         self._update_queue_status(queue_id, STATUS_APPROVED)
@@ -366,6 +493,37 @@ class FirebaseCRMDatabase:
                 continue
             rows.append(item)
         return sorted(rows, key=lambda row: row.get("score", 0), reverse=True)
+
+    def get_lead(self, lead_id) -> Optional[Dict[str, Any]]:
+        doc = self.leads.document(str(lead_id)).get()
+        if not doc.exists:
+            return None
+        return {"id": doc.id, **doc.to_dict()}
+
+    def update_lead(self, lead_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        allowed = {
+            "text", "cleaned_text", "source", "author", "url", "timestamp",
+            "score", "intent_level", "is_lead", "signals", "recommended_action",
+            "ai_response", "status", "platform_metadata",
+        }
+        clean_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not clean_updates:
+            return self.get_lead(lead_id)
+        doc_ref = self.leads.document(str(lead_id))
+        if not doc_ref.get().exists:
+            return None
+        clean_updates["updated_at"] = _now()
+        doc_ref.set(clean_updates, merge=True)
+        return self.get_lead(lead_id)
+
+    def delete_lead(self, lead_id) -> bool:
+        doc_ref = self.leads.document(str(lead_id))
+        if not doc_ref.get().exists:
+            return False
+        for doc in self.review_queue.where("lead_id", "==", str(lead_id)).stream():
+            doc.reference.delete()
+        doc_ref.delete()
+        return True
 
     def get_stats(self) -> Dict[str, Any]:
         leads = [{"id": doc.id, **doc.to_dict()} for doc in self.leads.stream()]
@@ -407,8 +565,17 @@ class CRMDatabase:
     def add_to_review_queue(self, lead_id, action: str, content: str):
         return self.backend.add_to_review_queue(lead_id, action, content)
 
-    def get_review_queue(self, status: str = STATUS_PENDING) -> List[Dict[str, Any]]:
+    def get_review_queue(self, status: Optional[str] = STATUS_PENDING) -> List[Dict[str, Any]]:
         return self.backend.get_review_queue(status=status)
+
+    def get_review_queue_item(self, queue_id) -> Optional[Dict[str, Any]]:
+        return self.backend.get_review_queue_item(queue_id)
+
+    def update_review_queue_item(self, queue_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return self.backend.update_review_queue_item(queue_id, updates)
+
+    def delete_review_queue_item(self, queue_id) -> bool:
+        return self.backend.delete_review_queue_item(queue_id)
 
     def approve_action(self, queue_id):
         return self.backend.approve_action(queue_id)
@@ -418,6 +585,15 @@ class CRMDatabase:
 
     def get_leads(self, min_score: int = 0, source: Optional[str] = None) -> List[Dict[str, Any]]:
         return self.backend.get_leads(min_score=min_score, source=source)
+
+    def get_lead(self, lead_id) -> Optional[Dict[str, Any]]:
+        return self.backend.get_lead(lead_id)
+
+    def update_lead(self, lead_id, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return self.backend.update_lead(lead_id, updates)
+
+    def delete_lead(self, lead_id) -> bool:
+        return self.backend.delete_lead(lead_id)
 
     def get_stats(self) -> Dict[str, Any]:
         return self.backend.get_stats()

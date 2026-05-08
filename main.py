@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 import config
 from ingestion import IngestionOrchestrator
 from ai_engine import GeminiEngine
-from crm import CRMDatabase
+from crm import CRMDatabase, STATUS_PENDING
 from linkedin_client import LinkedInClient
 from content_scheduler import ContentScheduler
 
@@ -258,6 +258,12 @@ def api_index():
             "linkedin_post": "POST /api/linkedin/post",
             "linkedin_comment": "POST /api/linkedin/comment",
             "linkedin_like": "POST /api/linkedin/like",
+            "linkedin_comments_read": "GET /api/linkedin/comments/<post_id>",
+            "linkedin_likes_read": "GET /api/linkedin/likes/<post_id>",
+            "firebase_leads": "GET /api/firebase/leads",
+            "firebase_lead_detail": "GET|PATCH|DELETE /api/firebase/leads/<lead_id>",
+            "firebase_posts": "GET /api/firebase/posts",
+            "firebase_post_detail": "GET|PATCH|DELETE /api/firebase/posts/<post_id>",
             "generate_linkedin_post": "POST /api/llm/generate-linkedin-post",
         },
     }), 200
@@ -422,6 +428,189 @@ def api_linkedin_like_post():
         return json_error(str(e), 500)
 
 
+@app.route("/api/linkedin/comments/<path:post_id>", methods=["GET"])
+def api_linkedin_read_comments(post_id: str):
+    """Read comments from a LinkedIn post."""
+    try:
+        linkedin_client = LinkedInClient()
+        if not linkedin_client.api_available:
+            return json_error("LinkedIn API not available. Check credentials.", 503)
+
+        comments = linkedin_client.fetch_comments(post_id)
+        return jsonify({
+            "success": True,
+            "post_id": post_id,
+            "count": len(comments),
+            "comments": comments,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error in /api/linkedin/comments/{post_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/linkedin/likes/<path:post_id>", methods=["GET"])
+def api_linkedin_read_likes(post_id: str):
+    """Read like count from a LinkedIn post."""
+    try:
+        linkedin_client = LinkedInClient()
+        if not linkedin_client.api_available:
+            return json_error("LinkedIn API not available. Check credentials.", 503)
+
+        likes = linkedin_client.fetch_likes(post_id)
+        return jsonify({
+            "success": True,
+            "post_id": post_id,
+            "likes": likes,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error in /api/linkedin/likes/{post_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/leads", methods=["GET"])
+def api_firebase_list_leads():
+    """Read leads from the configured CRM backend."""
+    try:
+        min_score = request.args.get("min_score", default=0, type=int)
+        source = request.args.get("source")
+        crm = CRMDatabase()
+        leads = crm.get_leads(min_score=min_score, source=source)
+        return jsonify({
+            "success": True,
+            "backend": config.DB_BACKEND,
+            "count": len(leads),
+            "leads": leads,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error in /api/firebase/leads: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/leads/<path:lead_id>", methods=["GET"])
+def api_firebase_get_lead(lead_id: str):
+    """Read a single lead by ID."""
+    try:
+        lead = CRMDatabase().get_lead(lead_id)
+        if not lead:
+            return json_error("Lead not found", 404)
+        return jsonify({"success": True, "lead": lead}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/firebase/leads/{lead_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/leads/<path:lead_id>", methods=["PATCH", "PUT"])
+def api_firebase_update_lead(lead_id: str):
+    """Update a lead by ID."""
+    try:
+        data = get_json_body()
+        if not data:
+            return json_error("Request body cannot be empty", 400)
+
+        lead = CRMDatabase().update_lead(lead_id, data)
+        if not lead:
+            return json_error("Lead not found", 404)
+        return jsonify({
+            "success": True,
+            "lead": lead,
+            "message": "Lead updated successfully",
+        }), 200
+    except Exception as e:
+        logger.error(f"API error updating lead {lead_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/leads/<path:lead_id>", methods=["DELETE"])
+def api_firebase_delete_lead(lead_id: str):
+    """Delete a lead by ID. Related review queue items are also removed."""
+    try:
+        deleted = CRMDatabase().delete_lead(lead_id)
+        if not deleted:
+            return json_error("Lead not found", 404)
+        return jsonify({
+            "success": True,
+            "message": "Lead deleted successfully",
+            "lead_id": lead_id,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error deleting lead {lead_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/review-queue", methods=["GET"])
+@app.route("/api/firebase/posts", methods=["GET"])
+def api_firebase_list_posts():
+    """Read generated/stored post actions from the review queue."""
+    try:
+        status = request.args.get("status", STATUS_PENDING)
+        crm = CRMDatabase()
+        posts = crm.get_review_queue(status=status)
+        return jsonify({
+            "success": True,
+            "backend": config.DB_BACKEND,
+            "status": status,
+            "count": len(posts),
+            "posts": posts,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error in /api/firebase/posts: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/review-queue/<path:post_id>", methods=["GET"])
+@app.route("/api/firebase/posts/<path:post_id>", methods=["GET"])
+def api_firebase_get_post(post_id: str):
+    """Read a generated/stored post action by review queue ID."""
+    try:
+        post = CRMDatabase().get_review_queue_item(post_id)
+        if not post:
+            return json_error("Post not found", 404)
+        return jsonify({"success": True, "post": post}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/firebase/posts/{post_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/review-queue/<path:post_id>", methods=["PATCH", "PUT"])
+@app.route("/api/firebase/posts/<path:post_id>", methods=["PATCH", "PUT"])
+def api_firebase_update_post(post_id: str):
+    """Update generated/stored post content, action, or status."""
+    try:
+        data = get_json_body()
+        if not data:
+            return json_error("Request body cannot be empty", 400)
+
+        post = CRMDatabase().update_review_queue_item(post_id, data)
+        if not post:
+            return json_error("Post not found", 404)
+        return jsonify({
+            "success": True,
+            "post": post,
+            "message": "Post updated successfully",
+        }), 200
+    except Exception as e:
+        logger.error(f"API error updating post {post_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/firebase/review-queue/<path:post_id>", methods=["DELETE"])
+@app.route("/api/firebase/posts/<path:post_id>", methods=["DELETE"])
+def api_firebase_delete_post(post_id: str):
+    """Delete a generated/stored post action by review queue ID."""
+    try:
+        deleted = CRMDatabase().delete_review_queue_item(post_id)
+        if not deleted:
+            return json_error("Post not found", 404)
+        return jsonify({
+            "success": True,
+            "message": "Post deleted successfully",
+            "post_id": post_id,
+        }), 200
+    except Exception as e:
+        logger.error(f"API error deleting post {post_id}: {e}")
+        return json_error(str(e), 500)
+
+
 @app.route("/api/health", methods=["GET"])
 def api_health():
     """Health check endpoint."""
@@ -505,6 +694,10 @@ def run_api_server(host: str = "127.0.0.1", port: int = 5000):
     logger.info("  POST /api/linkedin/post               - Post content on LinkedIn")
     logger.info("  POST /api/linkedin/comment            - Post comment on LinkedIn")
     logger.info("  POST /api/linkedin/like               - Like a post on LinkedIn")
+    logger.info("  GET  /api/linkedin/comments/<post_id> - Read LinkedIn comments")
+    logger.info("  GET  /api/linkedin/likes/<post_id>    - Read LinkedIn like count")
+    logger.info("  GET  /api/firebase/leads              - Read stored leads")
+    logger.info("  GET  /api/firebase/posts              - Read stored/generated posts")
     logger.info("  POST /api/llm/generate-linkedin-post  - Generate post from topic (LLM)")
     logger.info("  GET  /api/health                      - Health check")
     print_separator()

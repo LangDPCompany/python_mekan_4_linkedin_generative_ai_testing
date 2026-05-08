@@ -223,6 +223,237 @@ curl -X POST http://127.0.0.1:8888/api/llm/generate-linkedin-post \
 
 ---
 
+### 6. **Firebase/CRM Leads Oxu**
+
+Firebase Firestore-da (`leads` collection) və ya lokal SQLite-da saxlanılan lead datalarını oxuyun.
+
+**Endpoint:**
+```
+GET /api/firebase/leads
+```
+
+**Query Parametrlər:**
+- `min_score` - Optional. Minimum score filteri. Default: `0`
+- `source` - Optional. Məsələn: `linkedin` və ya `reddit`
+
+**cURL Örneği:**
+```bash
+curl "http://127.0.0.1:8888/api/firebase/leads?min_score=60&source=linkedin"
+```
+
+**Başarılı Yanıt (200):**
+```json
+{
+  "success": true,
+  "backend": "firebase",
+  "count": 1,
+  "leads": [
+    {
+      "id": "lead_doc_id",
+      "text": "Original post text",
+      "source": "linkedin",
+      "score": 80,
+      "intent_level": "high",
+      "is_lead": true,
+      "recommended_action": "generate_linkedin_post"
+    }
+  ]
+}
+```
+
+---
+
+### 7. **Firebase/CRM Lead Detail, Update, Delete**
+
+Tək lead-i ID ilə oxuyun, update edin və ya silin.
+
+**Endpoint-lər:**
+```
+GET    /api/firebase/leads/{lead_id}
+PATCH  /api/firebase/leads/{lead_id}
+PUT    /api/firebase/leads/{lead_id}
+DELETE /api/firebase/leads/{lead_id}
+```
+
+**Update edilə bilən field-lər:**
+`text`, `cleaned_text`, `source`, `author`, `url`, `timestamp`, `score`, `intent_level`, `is_lead`, `signals`, `recommended_action`, `ai_response`, `status`, `platform_metadata`
+
+**Read cURL:**
+```bash
+curl http://127.0.0.1:8888/api/firebase/leads/lead_doc_id
+```
+
+**Update cURL:**
+```bash
+curl -X PATCH http://127.0.0.1:8888/api/firebase/leads/lead_doc_id \
+  -H "Content-Type: application/json" \
+  -d '{
+    "score": 90,
+    "status": "reviewed",
+    "ai_response": "Updated generated content"
+  }'
+```
+
+**Delete cURL:**
+```bash
+curl -X DELETE http://127.0.0.1:8888/api/firebase/leads/lead_doc_id
+```
+
+**Qeyd:** Lead silinəndə həmin lead-ə bağlı `review_queue` item-ləri də silinir.
+
+---
+
+### 8. **Firebase/CRM Generated Post-ları Oxu**
+
+Pipeline-in yaratdığı LinkedIn post/comment content-ləri `review_queue` collection/table içində saxlanılır. Bu endpoint-lər həmin created/generated post-ları oxumaq üçündür.
+
+**Endpoint-lər:**
+```
+GET /api/firebase/posts
+GET /api/firebase/review-queue
+```
+
+Hər iki endpoint eyni datanı qaytarır. `posts` daha rahat alias-dır.
+
+**Query Parametrlər:**
+- `status` - Optional. `pending`, `approved`, `rejected`, yaxud `all`. Default: `pending`
+
+**cURL Örneği:**
+```bash
+curl "http://127.0.0.1:8888/api/firebase/posts?status=all"
+```
+
+**Başarılı Yanıt (200):**
+```json
+{
+  "success": true,
+  "backend": "firebase",
+  "status": "all",
+  "count": 1,
+  "posts": [
+    {
+      "id": "queue_doc_id",
+      "lead_id": "lead_doc_id",
+      "action": "generate_linkedin_post",
+      "content": "Generated LinkedIn post content...",
+      "status": "pending",
+      "score": 80,
+      "source": "linkedin",
+      "url": "https://www.linkedin.com/feed/update/..."
+    }
+  ]
+}
+```
+
+---
+
+### 9. **Firebase/CRM Generated Post Detail, Update, Delete**
+
+Yaradılmış post/comment draft-larını review queue ID ilə oxuyun, update edin və ya silin.
+
+**Endpoint-lər:**
+```
+GET    /api/firebase/posts/{post_id}
+PATCH  /api/firebase/posts/{post_id}
+PUT    /api/firebase/posts/{post_id}
+DELETE /api/firebase/posts/{post_id}
+```
+
+Alternative path:
+```
+GET    /api/firebase/review-queue/{post_id}
+PATCH  /api/firebase/review-queue/{post_id}
+PUT    /api/firebase/review-queue/{post_id}
+DELETE /api/firebase/review-queue/{post_id}
+```
+
+**Update edilə bilən field-lər:**
+`content`, `action`, `status`
+
+**Read cURL:**
+```bash
+curl http://127.0.0.1:8888/api/firebase/posts/queue_doc_id
+```
+
+**Update cURL:**
+```bash
+curl -X PATCH http://127.0.0.1:8888/api/firebase/posts/queue_doc_id \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Updated LinkedIn post draft",
+    "status": "pending"
+  }'
+```
+
+**Delete cURL:**
+```bash
+curl -X DELETE http://127.0.0.1:8888/api/firebase/posts/queue_doc_id
+```
+
+---
+
+### 10. **LinkedIn Comment-ləri Oxu**
+
+LinkedIn post-un comment-lərini oxuyun.
+
+**Endpoint:**
+```
+GET /api/linkedin/comments/{post_id}
+```
+
+**cURL Örneği:**
+```bash
+curl "http://127.0.0.1:8888/api/linkedin/comments/urn:li:ugcPost:7457679327678189568"
+```
+
+**Başarılı Yanıt (200):**
+```json
+{
+  "success": true,
+  "post_id": "urn:li:ugcPost:7457679327678189568",
+  "count": 1,
+  "comments": [
+    {
+      "text": "Great point!",
+      "author": "urn:li:person:...",
+      "timestamp": "2026-05-08T10:00:00",
+      "comment_id": "..."
+    }
+  ]
+}
+```
+
+---
+
+### 11. **LinkedIn Like Sayını Oxu**
+
+LinkedIn post-un like sayını oxuyun.
+
+**Endpoint:**
+```
+GET /api/linkedin/likes/{post_id}
+```
+
+**cURL Örneği:**
+```bash
+curl "http://127.0.0.1:8888/api/linkedin/likes/urn:li:ugcPost:7457679327678189568"
+```
+
+**Başarılı Yanıt (200):**
+```json
+{
+  "success": true,
+  "post_id": "urn:li:ugcPost:7457679327678189568",
+  "likes": 12
+}
+```
+
+**Hata Yanıtları:**
+- `503` - LinkedIn API istifadə edilə bilmir
+- `500` - Sunucu hatası
+
+---
+
 ## Kullanım Örnekleri
 
 ### Python ile
