@@ -310,16 +310,28 @@ def api_linkedin_post_share():
         
         share_urn = linkedin_client.post_share(content)
         if share_urn:
+            firebase_record = CRMDatabase().add_linkedin_post_record(
+                content=content,
+                status="posted",
+                share_urn=share_urn,
+            )
             return jsonify({
                 "success": True,
                 "share_urn": share_urn,
+                "firebase_record": firebase_record,
                 "message": "Post shared successfully on LinkedIn"
             }), 201
         else:
+            firebase_record = CRMDatabase().add_linkedin_post_record(
+                content=content,
+                status="post_failed",
+                error=linkedin_client.last_error,
+            )
             return json_error(
                 "Failed to post on LinkedIn",
                 502,
                 linkedin_error=linkedin_client.last_error,
+                firebase_record=firebase_record,
             )
     
     except Exception as e:

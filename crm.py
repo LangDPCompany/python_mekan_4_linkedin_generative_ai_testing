@@ -106,6 +106,50 @@ class CRMDatabase:
         doc_ref.set(self._lead_payload(item, existing_created_at), merge=True)
         return lead_id
 
+    def add_linkedin_post_record(
+        self,
+        content: str,
+        status: str,
+        share_urn: Optional[str] = None,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
+        now = _now()
+        lead_ref = self.leads.document()
+        platform_metadata = {
+            "endpoint": "/api/linkedin/post",
+            "share_urn": share_urn,
+            "error": error,
+        }
+        lead_ref.set({
+            "text": content,
+            "cleaned_text": content,
+            "source": "linkedin",
+            "author": "api/linkedin/post",
+            "url": "",
+            "timestamp": now,
+            "score": 0,
+            "intent_level": "manual_post",
+            "is_lead": False,
+            "signals": {},
+            "recommended_action": "manual_linkedin_post",
+            "ai_response": None,
+            "status": status,
+            "platform_metadata": platform_metadata,
+            "created_at": now,
+            "updated_at": now,
+        })
+        queue_ref = self.review_queue.document()
+        queue_ref.set({
+            "lead_id": lead_ref.id,
+            "action": "manual_linkedin_post",
+            "content": content,
+            "status": status,
+            "platform_metadata": platform_metadata,
+            "created_at": now,
+            "updated_at": now,
+        })
+        return {"lead_id": lead_ref.id, "post_id": queue_ref.id}
+
     def add_to_review_queue(self, lead_id: str, action: str, content: str) -> str:
         pending_items = (
             self.review_queue
@@ -137,6 +181,7 @@ class CRMDatabase:
         return doc_ref.id
 
     def get_review_queue(self, status: Optional[str] = STATUS_PENDING) -> List[Dict[str, Any]]:
+        self.ensure_manual_linkedin_posts_in_review_queue()
         rows = []
         stream = self.review_queue.stream() if status in (None, "", "all") else self.review_queue.where("status", "==", status).stream()
         for doc in stream:
@@ -154,6 +199,30 @@ class CRMDatabase:
                 })
             rows.append(queue_item)
         return sorted(rows, key=lambda row: (row.get("score", 0), row.get("created_at", "")), reverse=True)
+
+    def ensure_manual_linkedin_posts_in_review_queue(self):
+        for lead_doc in self.leads.where("recommended_action", "==", "manual_linkedin_post").stream():
+            existing = (
+                self.review_queue
+                .where("lead_id", "==", lead_doc.id)
+                .where("action", "==", "manual_linkedin_post")
+                .limit(1)
+                .stream()
+            )
+            if next(existing, None):
+                continue
+
+            lead = lead_doc.to_dict()
+            created_at = lead.get("created_at") or _now()
+            self.review_queue.document().set({
+                "lead_id": lead_doc.id,
+                "action": "manual_linkedin_post",
+                "content": lead.get("text", ""),
+                "status": lead.get("status", STATUS_PENDING),
+                "platform_metadata": lead.get("platform_metadata", {}),
+                "created_at": created_at,
+                "updated_at": lead.get("updated_at") or created_at,
+            })
 
     def get_review_queue_item(self, queue_id) -> Optional[Dict[str, Any]]:
         doc = self.review_queue.document(str(queue_id)).get()
