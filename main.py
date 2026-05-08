@@ -316,7 +316,11 @@ def api_linkedin_post_share():
                 "message": "Post shared successfully on LinkedIn"
             }), 201
         else:
-            return json_error("Failed to post on LinkedIn", 502)
+            return json_error(
+                "Failed to post on LinkedIn",
+                502,
+                linkedin_error=linkedin_client.last_error,
+            )
     
     except Exception as e:
         logger.error(f"API error in /api/linkedin/post: {e}")
@@ -469,7 +473,7 @@ def api_linkedin_read_likes(post_id: str):
 
 @app.route("/api/firebase/leads", methods=["GET"])
 def api_firebase_list_leads():
-    """Read leads from the configured CRM backend."""
+    """Read leads from Firebase Firestore."""
     try:
         min_score = request.args.get("min_score", default=0, type=int)
         source = request.args.get("source")
@@ -477,7 +481,7 @@ def api_firebase_list_leads():
         leads = crm.get_leads(min_score=min_score, source=source)
         return jsonify({
             "success": True,
-            "backend": config.DB_BACKEND,
+            "backend": "firebase",
             "count": len(leads),
             "leads": leads,
         }), 200
@@ -547,7 +551,7 @@ def api_firebase_list_posts():
         posts = crm.get_review_queue(status=status)
         return jsonify({
             "success": True,
-            "backend": config.DB_BACKEND,
+            "backend": "firebase",
             "status": status,
             "count": len(posts),
             "posts": posts,

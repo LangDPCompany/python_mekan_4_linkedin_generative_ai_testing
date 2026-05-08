@@ -10,28 +10,14 @@ pip install -r requirements.txt
 
 `requirements.txt` includes `firebase-admin`.
 
-## 2. Enable Firebase Backend
-
-Set:
-
-```env
-DB_BACKEND=firebase
-```
-
-If you want local SQLite instead:
-
-```env
-DB_BACKEND=sqlite
-DB_PATH=leads.db
-```
-
-## 3. Required Firebase Admin Variables
+## 2. Required Firebase Admin Variables
 
 Add these to `.env` locally or Railway Variables in production:
 
 ```env
 FIREBASE_TYPE=service_account
 FIREBASE_PROJECT_ID=langdp-test
+FIREBASE_DATABASE_ID=leads
 FIREBASE_PRIVATE_KEY_ID=your-private-key-id
 FIREBASE_PRIVATE_KEY="<escaped-service-account-private-key>"
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@langdp-test.iam.gserviceaccount.com
@@ -57,7 +43,7 @@ FIREBASE_PROD=
 
 Do not commit real Firebase private keys to GitHub.
 
-## 4. Private Key Formatting
+## 3. Private Key Formatting
 
 For Railway, store the private key as one env value with escaped newlines:
 
@@ -67,9 +53,17 @@ FIREBASE_PRIVATE_KEY="<escaped-service-account-private-key>"
 
 The app converts `\n` into real newlines before initializing Firebase Admin SDK.
 
-## 5. Firestore Collections
+## 4. Firestore Database And Collections
 
-Default collections:
+The app connects to this Firestore database by default:
+
+```env
+FIREBASE_DATABASE_ID=leads
+```
+
+Use `FIREBASE_DATABASE_ID=(default)` only if you want to store CRM data in the default Firestore database.
+
+Default collections inside that database:
 
 - `leads`
 - `review_queue`
@@ -81,7 +75,7 @@ FIREBASE_LEADS_COLLECTION=leads
 FIREBASE_REVIEW_QUEUE_COLLECTION=review_queue
 ```
 
-## 6. Run Locally
+## 5. Run Locally
 
 ```bash
 python main.py run --sources linkedin --dry-run
@@ -101,14 +95,13 @@ Test:
 curl http://127.0.0.1:8890/api/health
 ```
 
-## 7. Railway
+## 6. Railway
 
 1. Push code to GitHub.
 2. Create a Railway project from the GitHub repo.
 3. Add all Firebase variables in Railway `Variables`.
-4. Set `DB_BACKEND=firebase`.
-5. Deploy. The included `Procfile` starts the API with Gunicorn.
+4. Deploy. The included `Procfile` starts the API with Gunicorn.
 
-## 8. Security
+## 7. Security
 
 If a Firebase service account private key was shared in chat, logs, screenshots, or GitHub, revoke it and create a new key in Google Cloud Console.

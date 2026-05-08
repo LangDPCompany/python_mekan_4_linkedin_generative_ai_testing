@@ -18,7 +18,7 @@ AI-powered LinkedIn automation system for lead generation.
 2. Set environment variables (see config.py)
 	- For personal profile posting, set `LINKEDIN_USE_PERSONAL_PROFILE=true`
 	- Optionally set `LINKEDIN_PERSONAL_PROFILE_ID` or `LINKEDIN_PERSONAL_PROFILE_URN`
-	- For Firebase/Firestore storage, set `DB_BACKEND=firebase` and the Firebase Admin SDK variables listed in `FIREBASE_SETUP.md`
+	- For Firestore storage, set the Firebase Admin SDK variables listed in `FIREBASE_SETUP.md`
 3. Run the pipeline safely: `python main.py run --sources linkedin --dry-run`
 4. To auto-publish generated LinkedIn content, set `APPROVAL_MODE=AUTO_POST`.
 5. Start the API server locally: `python main.py api --port 8890`
@@ -36,9 +36,6 @@ AI-powered LinkedIn automation system for lead generation.
 
 ## Database
 
-The app supports two CRM storage backends:
+The app stores CRM data only in Firebase Firestore using Firebase Admin SDK.
 
-- `DB_BACKEND=sqlite` stores data in `leads.db` for local development.
-- `DB_BACKEND=firebase` stores data in Firestore using Firebase Admin SDK.
-
-Use Firebase for Railway or production-style deploys. See `FIREBASE_SETUP.md`.
+See `FIREBASE_SETUP.md` for the required Firebase variables.

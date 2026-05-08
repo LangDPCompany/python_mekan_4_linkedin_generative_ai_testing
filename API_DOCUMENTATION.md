@@ -223,9 +223,9 @@ curl -X POST http://127.0.0.1:8888/api/llm/generate-linkedin-post \
 
 ---
 
-### 6. **Firebase/CRM Leads Oxu**
+### 6. **Firebase Leads Oxu**
 
-Firebase Firestore-da (`leads` collection) və ya lokal SQLite-da saxlanılan lead datalarını oxuyun.
+Firebase Firestore-da (`leads` collection) saxlanılan lead datalarını oxuyun.
 
 **Endpoint:**
 ```
@@ -263,7 +263,7 @@ curl "http://127.0.0.1:8888/api/firebase/leads?min_score=60&source=linkedin"
 
 ---
 
-### 7. **Firebase/CRM Lead Detail, Update, Delete**
+### 7. **Firebase Lead Detail, Update, Delete**
 
 Tək lead-i ID ilə oxuyun, update edin və ya silin.
 
@@ -303,9 +303,9 @@ curl -X DELETE http://127.0.0.1:8888/api/firebase/leads/lead_doc_id
 
 ---
 
-### 8. **Firebase/CRM Generated Post-ları Oxu**
+### 8. **Firebase Generated Post-ları Oxu**
 
-Pipeline-in yaratdığı LinkedIn post/comment content-ləri `review_queue` collection/table içində saxlanılır. Bu endpoint-lər həmin created/generated post-ları oxumaq üçündür.
+Pipeline-in yaratdığı LinkedIn post/comment content-ləri `review_queue` collection içində saxlanılır. Bu endpoint-lər həmin created/generated post-ları oxumaq üçündür.
 
 **Endpoint-lər:**
 ```
@@ -347,7 +347,7 @@ curl "http://127.0.0.1:8888/api/firebase/posts?status=all"
 
 ---
 
-### 9. **Firebase/CRM Generated Post Detail, Update, Delete**
+### 9. **Firebase Generated Post Detail, Update, Delete**
 
 Yaradılmış post/comment draft-larını review queue ID ilə oxuyun, update edin və ya silin.
 
@@ -540,29 +540,24 @@ postOnLinkedIn("API'den javascript test! 🚀")
 
 ## Ayarlar
 
-### Database Backend
+### Database
 
-The API and pipeline use the same CRM storage layer.
-
-For local SQLite:
+The API and pipeline store CRM data in Firebase Firestore.
 
 ```env
-DB_BACKEND=sqlite
-DB_PATH=leads.db
-```
-
-For Firebase Firestore:
-
-```env
-DB_BACKEND=firebase
 FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_DATABASE_ID=leads
 FIREBASE_CLIENT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="<escaped-service-account-private-key>"
 FIREBASE_PRIVATE_KEY_ID=your-private-key-id
 FIREBASE_CLIENT_ID=your-client-id
 ```
 
-Firestore collections:
+Firestore database:
+
+- `leads`: default Firestore database ID used by this app
+
+Firestore collections inside that database:
 
 - `leads`: processed lead records
 - `review_queue`: pending, approved, and rejected actions

@@ -20,6 +20,7 @@ class LinkedInClient:
         self.api_base = config.LINKEDIN_API_BASE
         self.fallback_file = config.LINKEDIN_FALLBACK_FILE
         self.author_urn = None
+        self.last_error = None
         self.api_available = self._check_api_availability()
 
     def _headers(self) -> Dict[str, str]:
@@ -246,9 +247,11 @@ class LinkedInClient:
         return {"status": "ready_for_human_approval", "payload": payload}
 
     def post_share(self, text: str) -> Optional[str]:
+        self.last_error = None
         author_urn = self._get_author_urn()
         if not author_urn:
             logger.warning("No author URN. Cannot post.")
+            self.last_error = {"message": "No author URN configured"}
             return None
         url = f"{self.api_base}/ugcPosts"
         payload = {
@@ -265,10 +268,23 @@ class LinkedInClient:
         try:
             resp = requests.post(url, headers=self._headers(), json=payload, timeout=30)
             resp.raise_for_status()
-            share_id = resp.json().get("id") or resp.headers.get("x-restli-id")
+            try:
+                body = resp.json() if resp.content else {}
+            except ValueError:
+                body = {}
+            share_id = body.get("id") or resp.headers.get("x-restli-id")
             logger.info(f"Posted share successfully: {share_id}")
             return share_id or "posted"
+        except requests.HTTPError as e:
+            response = e.response
+            self.last_error = {
+                "status_code": response.status_code if response is not None else None,
+                "response": response.text if response is not None else str(e),
+            }
+            logger.error(f"Failed to post share: {self.last_error}")
+            return None
         except Exception as e:
+            self.last_error = {"message": str(e)}
             logger.error(f"Failed to post share: {e}")
             return None
 
