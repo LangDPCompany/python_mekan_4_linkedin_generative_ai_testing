@@ -65,8 +65,17 @@ Use `FIREBASE_DATABASE_ID=(default)` only if you want to store CRM data in the d
 
 Default collections inside that database:
 
-- `leads`
-- `review_queue`
+- `leads`: processed lead records and manual LinkedIn post records
+- `review_queue`: generated drafts and manual LinkedIn post records returned by `/api/firebase/posts`
+
+`POST /api/linkedin/post` writes to both collections:
+
+- `leads`: stores the full post content and metadata
+- `review_queue`: stores the API-facing post record
+- `status=posted` when LinkedIn accepts the post
+- `status=post_failed` when LinkedIn rejects the post
+
+`GET /api/firebase/posts?status=all` reads `review_queue`. If an older manual LinkedIn post exists only in `leads`, the API automatically creates the missing `review_queue` record when posts are read.
 
 Override names if needed:
 

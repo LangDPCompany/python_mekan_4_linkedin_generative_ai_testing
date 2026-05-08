@@ -3,7 +3,7 @@
 LinkedIn post paylaşma işlemlerini HTTP API çağrıları ile yapabilirsiniz. API'yi çalıştırmak için aşağıdaki komutu kullanın:
 
 ```bash
-python main.py api --port 8888
+python main.py api --port 8890
 ```
 
 ---
@@ -21,7 +21,7 @@ GET /api/health
 
 **cURL Örneği:**
 ```bash
-curl http://127.0.0.1:8888/api/health
+curl http://127.0.0.1:8890/api/health
 ```
 
 **Yanıt Örneği:**
@@ -58,7 +58,7 @@ application/json
 
 **cURL Örneği:**
 ```bash
-curl -X POST http://127.0.0.1:8888/api/linkedin/post \
+curl -X POST http://127.0.0.1:8890/api/linkedin/post \
   -H "Content-Type: application/json" \
   -d '{
     "content": "Harika bir gün başlamak için hepinize selamlar! 👋 Yeni AI projemiz online! 🚀"
@@ -70,13 +70,41 @@ curl -X POST http://127.0.0.1:8888/api/linkedin/post \
 {
   "success": true,
   "share_urn": "urn:li:share:7457679327678189568",
+  "firebase_record": {
+    "lead_id": "lead_doc_id",
+    "post_id": "review_queue_doc_id"
+  },
   "message": "Post shared successfully on LinkedIn"
+}
+```
+
+Bu endpoint LinkedIn post cəhdini Firebase Firestore-da da saxlayır:
+
+- `leads` collection: post content-i və metadata saxlanılır
+- `review_queue` collection: `/api/firebase/posts` endpoint-i üçün post record-u saxlanılır
+- Uğurlu post üçün `status = posted`
+- LinkedIn uğursuz cavab versə, yenə Firebase-ə yazılır və `status = post_failed` olur
+
+**LinkedIn uğursuz, Firebase record uğurlu Yanıt (502):**
+```json
+{
+  "success": false,
+  "error": "Failed to post on LinkedIn",
+  "linkedin_error": {
+    "status_code": 403,
+    "response": "LinkedIn error response..."
+  },
+  "firebase_record": {
+    "lead_id": "lead_doc_id",
+    "post_id": "review_queue_doc_id"
+  }
 }
 ```
 
 **Hata Yanıtları:**
 - `400` - Content field boş veya eksik
 - `503` - LinkedIn API kullanılamıyor
+- `502` - LinkedIn post uğursuz oldu, amma cəhd Firebase-də `post_failed` kimi saxlanılır
 - `500` - Sunucu hatası
 
 ---
@@ -105,7 +133,7 @@ application/json
 
 **cURL Örneği:**
 ```bash
-curl -X POST http://127.0.0.1:8888/api/linkedin/comment \
+curl -X POST http://127.0.0.1:8890/api/linkedin/comment \
   -H "Content-Type: application/json" \
   -d '{
     "post_id": "7457679327678189568",
@@ -152,7 +180,7 @@ application/json
 
 **cURL Örneği:**
 ```bash
-curl -X POST http://127.0.0.1:8888/api/linkedin/like \
+curl -X POST http://127.0.0.1:8890/api/linkedin/like \
   -H "Content-Type: application/json" \
   -d '{"post_id": "7457679327678189568"}'
 ```
@@ -198,7 +226,7 @@ application/json
 
 **cURL Örneği:**
 ```bash
-curl -X POST http://127.0.0.1:8888/api/llm/generate-linkedin-post \
+curl -X POST http://127.0.0.1:8890/api/llm/generate-linkedin-post \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "Generative AI testing startup-lar üçün niyə vacibdir?"
@@ -238,7 +266,7 @@ GET /api/firebase/leads
 
 **cURL Örneği:**
 ```bash
-curl "http://127.0.0.1:8888/api/firebase/leads?min_score=60&source=linkedin"
+curl "http://127.0.0.1:8890/api/firebase/leads?min_score=60&source=linkedin"
 ```
 
 **Başarılı Yanıt (200):**
@@ -280,12 +308,12 @@ DELETE /api/firebase/leads/{lead_id}
 
 **Read cURL:**
 ```bash
-curl http://127.0.0.1:8888/api/firebase/leads/lead_doc_id
+curl http://127.0.0.1:8890/api/firebase/leads/lead_doc_id
 ```
 
 **Update cURL:**
 ```bash
-curl -X PATCH http://127.0.0.1:8888/api/firebase/leads/lead_doc_id \
+curl -X PATCH http://127.0.0.1:8890/api/firebase/leads/lead_doc_id \
   -H "Content-Type: application/json" \
   -d '{
     "score": 90,
@@ -296,16 +324,16 @@ curl -X PATCH http://127.0.0.1:8888/api/firebase/leads/lead_doc_id \
 
 **Delete cURL:**
 ```bash
-curl -X DELETE http://127.0.0.1:8888/api/firebase/leads/lead_doc_id
+curl -X DELETE http://127.0.0.1:8890/api/firebase/leads/lead_doc_id
 ```
 
 **Qeyd:** Lead silinəndə həmin lead-ə bağlı `review_queue` item-ləri də silinir.
 
 ---
 
-### 8. **Firebase Generated Post-ları Oxu**
+### 8. **Firebase Generated/Manual Post-ları Oxu**
 
-Pipeline-in yaratdığı LinkedIn post/comment content-ləri `review_queue` collection içində saxlanılır. Bu endpoint-lər həmin created/generated post-ları oxumaq üçündür.
+Pipeline-in yaratdığı LinkedIn post/comment content-ləri və `/api/linkedin/post` ilə edilən manual post cəhdləri `review_queue` collection içində saxlanılır. Bu endpoint-lər həmin generated/manual post datalarını oxumaq üçündür.
 
 **Endpoint-lər:**
 ```
@@ -316,11 +344,13 @@ GET /api/firebase/review-queue
 Hər iki endpoint eyni datanı qaytarır. `posts` daha rahat alias-dır.
 
 **Query Parametrlər:**
-- `status` - Optional. `pending`, `approved`, `rejected`, yaxud `all`. Default: `pending`
+- `status` - Optional. `pending`, `approved`, `rejected`, `posted`, `post_failed`, `firebase_connection_test`, yaxud `all`. Default: `pending`
+
+**Qeyd:** Köhnə manual LinkedIn post record-ları yalnız `leads` collection-da qalıbsa, API onları avtomatik `review_queue` collection-a əlavə edir. Buna görə `/api/firebase/posts?status=all` bütün post datalarını qaytarır.
 
 **cURL Örneği:**
 ```bash
-curl "http://127.0.0.1:8888/api/firebase/posts?status=all"
+curl "http://127.0.0.1:8890/api/firebase/posts?status=all"
 ```
 
 **Başarılı Yanıt (200):**
@@ -334,12 +364,17 @@ curl "http://127.0.0.1:8888/api/firebase/posts?status=all"
     {
       "id": "queue_doc_id",
       "lead_id": "lead_doc_id",
-      "action": "generate_linkedin_post",
-      "content": "Generated LinkedIn post content...",
-      "status": "pending",
-      "score": 80,
+      "action": "manual_linkedin_post",
+      "content": "LinkedIn post content...",
+      "status": "posted",
+      "score": 0,
       "source": "linkedin",
-      "url": "https://www.linkedin.com/feed/update/..."
+      "author": "api/linkedin/post",
+      "platform_metadata": {
+        "endpoint": "/api/linkedin/post",
+        "share_urn": "urn:li:share:7458448549433839616",
+        "error": null
+      }
     }
   ]
 }
@@ -372,12 +407,12 @@ DELETE /api/firebase/review-queue/{post_id}
 
 **Read cURL:**
 ```bash
-curl http://127.0.0.1:8888/api/firebase/posts/queue_doc_id
+curl http://127.0.0.1:8890/api/firebase/posts/queue_doc_id
 ```
 
 **Update cURL:**
 ```bash
-curl -X PATCH http://127.0.0.1:8888/api/firebase/posts/queue_doc_id \
+curl -X PATCH http://127.0.0.1:8890/api/firebase/posts/queue_doc_id \
   -H "Content-Type: application/json" \
   -d '{
     "content": "Updated LinkedIn post draft",
@@ -387,7 +422,7 @@ curl -X PATCH http://127.0.0.1:8888/api/firebase/posts/queue_doc_id \
 
 **Delete cURL:**
 ```bash
-curl -X DELETE http://127.0.0.1:8888/api/firebase/posts/queue_doc_id
+curl -X DELETE http://127.0.0.1:8890/api/firebase/posts/queue_doc_id
 ```
 
 ---
@@ -403,7 +438,7 @@ GET /api/linkedin/comments/{post_id}
 
 **cURL Örneği:**
 ```bash
-curl "http://127.0.0.1:8888/api/linkedin/comments/urn:li:ugcPost:7457679327678189568"
+curl "http://127.0.0.1:8890/api/linkedin/comments/urn:li:ugcPost:7457679327678189568"
 ```
 
 **Başarılı Yanıt (200):**
@@ -436,7 +471,7 @@ GET /api/linkedin/likes/{post_id}
 
 **cURL Örneği:**
 ```bash
-curl "http://127.0.0.1:8888/api/linkedin/likes/urn:li:ugcPost:7457679327678189568"
+curl "http://127.0.0.1:8890/api/linkedin/likes/urn:li:ugcPost:7457679327678189568"
 ```
 
 **Başarılı Yanıt (200):**
@@ -462,7 +497,7 @@ curl "http://127.0.0.1:8888/api/linkedin/likes/urn:li:ugcPost:745767932767818956
 import requests
 import json
 
-API_URL = "http://127.0.0.1:8888"
+API_URL = "http://127.0.0.1:8890"
 
 # Post Paylaş
 def post_on_linkedin(content):
@@ -499,7 +534,7 @@ print(result)
 ### JavaScript/Node.js ile
 
 ```javascript
-const API_URL = "http://127.0.0.1:8888";
+const API_URL = "http://127.0.0.1:8890";
 
 // Post Paylaş
 async function postOnLinkedIn(content) {
@@ -559,8 +594,16 @@ Firestore database:
 
 Firestore collections inside that database:
 
-- `leads`: processed lead records
-- `review_queue`: pending, approved, and rejected actions
+- `leads`: processed lead records and manual LinkedIn post records
+- `review_queue`: pending/approved/rejected generated actions and manual LinkedIn post records returned by `/api/firebase/posts`
+
+Manual LinkedIn post flow:
+
+- `POST /api/linkedin/post` writes to both `leads` and `review_queue`
+- Successful LinkedIn post: `status=posted`
+- Failed LinkedIn post: `status=post_failed`, with LinkedIn error details in `platform_metadata.error`
+- `GET /api/firebase/posts?status=all` returns all `review_queue` post records
+- Older manual post records that exist only in `leads` are auto-added to `review_queue` when posts are read
 
 Optional collection names:
 
@@ -575,8 +618,11 @@ API sunucusunu başlarken port ve host belirtebilirsiniz:
 # Özel port ve host ile başlat
 python main.py api --host 0.0.0.0 --port 8080
 
-# Varsayılan (127.0.0.1:8888)
+# Kod default-u: env PORT və ya 5000
 python main.py api
+
+# Bu dokümandakı nümunələr üçün istifadə etdiyimiz port
+python main.py api --port 8890
 ```
 
 ---
@@ -605,7 +651,7 @@ Request body'sini kontrol edin. Gerekli alanları eksik bırakmış olabilirsini
 ### Connection Refused
 API sunucusunun çalıştığından emin olun:
 ```bash
-curl http://127.0.0.1:8888/api/health
+curl http://127.0.0.1:8890/api/health
 ```
 
 ---

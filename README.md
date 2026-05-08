@@ -38,4 +38,16 @@ AI-powered LinkedIn automation system for lead generation.
 
 The app stores CRM data only in Firebase Firestore using Firebase Admin SDK.
 
+Default Firestore target:
+
+- Project: `langdp-test`
+- Database ID: `leads`
+- `leads` collection: processed leads and manual LinkedIn post records
+- `review_queue` collection: generated drafts and manual LinkedIn post records returned by `/api/firebase/posts`
+
+`POST /api/linkedin/post` writes a Firebase record even when LinkedIn posting fails:
+
+- `status=posted` when LinkedIn accepts the post
+- `status=post_failed` when LinkedIn rejects the post
+
 See `FIREBASE_SETUP.md` for the required Firebase variables.
