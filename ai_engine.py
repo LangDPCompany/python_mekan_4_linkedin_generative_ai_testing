@@ -2,55 +2,43 @@ import logging
 import os
 from typing import Dict, Any, Optional
 
-import requests
-
 logger = logging.getLogger(__name__)
 
 
 class GeminiEngine:
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY", "")
-        self.base_url = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
         self.timeout = int(os.getenv("GEMINI_TIMEOUT", "10"))
         self._active_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.last_error = ""
 
     def _call(self, prompt: str) -> Optional[str]:
+        self.last_error = ""
         if not self.api_key:
-            logger.warning("GEMINI_API_KEY is not set.")
+            self.last_error = "GEMINI_API_KEY is not set."
+            logger.warning(self.last_error)
             return None
-        url = f"{self.base_url}/models/{self._active_model}:generateContent"
-        headers = {
-            "x-goog-api-key": self.api_key,
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}],
-                }
-            ],
-            "generationConfig": {"maxOutputTokens": 300},
-        }
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            parts = (
-                data.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [])
+            from google import genai
+
+            client = genai.Client(api_key=self.api_key)
+            response = client.models.generate_content(
+                model=self._active_model,
+                contents=prompt,
             )
-            text = "".join(part.get("text", "") for part in parts)
-            return text.strip()
-        except requests.exceptions.ConnectionError:
-            logger.error("Gemini API not reachable.")
-            return None
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"Gemini API HTTP {e.response.status_code}: {e.response.text[:300]}")
+            text = (response.text or "").strip()
+            if not text:
+                self.last_error = "Gemini returned no text."
+                logger.error(self.last_error)
+                return None
+            return text
+        except ImportError:
+            self.last_error = "google-genai package is not installed. Run: pip install google-genai"
+            logger.error(self.last_error)
             return None
         except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
+            self.last_error = f"Gemini API call failed: {e}"
+            logger.error(self.last_error)
             return None
 
     def generate_content(self, item: Dict[str, Any]) -> Optional[str]:
@@ -139,13 +127,13 @@ class GeminiEngine:
             True if the engine is available, False otherwise.
         """
         if not self.api_key:
-            logger.warning("Gemini unavailable: GEMINI_API_KEY is not set.")
+            self.last_error = "GEMINI_API_KEY is not set."
+            logger.warning(f"Gemini unavailable: {self.last_error}")
             return False
         try:
-            url = f"{self.base_url}/models/{self._active_model}"
-            headers = {"x-goog-api-key": self.api_key}
-            resp = requests.get(url, headers=headers, timeout=self.timeout)
-            return resp.status_code == 200
-        except Exception as e:
-            logger.error(f"Failed to check GeminiEngine availability: {e}")
+            from google import genai  # noqa: F401
+            return True
+        except ImportError:
+            self.last_error = "google-genai package is not installed. Run: pip install google-genai"
+            logger.error(self.last_error)
             return False

@@ -471,7 +471,9 @@ def api_llm_generate_linkedin_post():
             return json_error(
                 "Gemini not available. Set GEMINI_API_KEY and check GEMINI_BASE_URL.",
                 503,
-                instructions="Check your Gemini setup."
+                instructions="Check your Gemini setup.",
+                model=ai_engine._active_model,
+                gemini_error=ai_engine.last_error,
             )
 
         post_content = ai_engine.generate_linkedin_post_from_topic(topic)
@@ -487,6 +489,7 @@ def api_llm_generate_linkedin_post():
                 "Failed to generate post from topic",
                 502,
                 model=ai_engine._active_model,
+                gemini_error=ai_engine.last_error,
             )
     
     except Exception as e:
