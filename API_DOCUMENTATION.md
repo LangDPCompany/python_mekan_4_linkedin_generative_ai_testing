@@ -8,6 +8,79 @@ python main.py api --port 8890
 
 ---
 
+## Environment Variables
+
+API-ni işə salmazdan əvvəl repo root-da `.env` faylı yaradın. `.env.example` sadəcə nümunədir; app lokalda `.env` faylını, Railway-də isə Railway Variables dəyərlərini oxuyur.
+
+Minimal lokal setup üçün:
+
+```env
+APPROVAL_MODE=AUTO_ANALYZE_ONLY
+
+LINKEDIN_ACCESS_TOKEN=your_linkedin_access_token
+LINKEDIN_ORGANIZATION_ID=your_linkedin_organization_id
+LINKEDIN_USE_PERSONAL_PROFILE=true
+LINKEDIN_PERSONAL_PROFILE_ID=your_personal_profile_id
+LINKEDIN_PERSONAL_PROFILE_URN=urn:li:person:your_personal_profile_id
+
+GEMINI_API_KEY=your_google_ai_studio_key
+GEMINI_MODEL=gemini-2.0-flash
+
+DB_BACKEND=firebase
+FIREBASE_PROJECT_ID=your_firebase_project_id
+FIREBASE_DATABASE_ID=leads
+FIREBASE_CLIENT_EMAIL=your_firebase_client_email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+Optional Meta/Facebook/Instagram endpoint-ləri üçün:
+
+```env
+META_GRAPH_VERSION=v23.0
+FACEBOOK_PAGE_ID=your_page_id
+FACEBOOK_PAGE_ACCESS_TOKEN=your_page_access_token
+INSTAGRAM_BUSINESS_ACCOUNT_ID=your_instagram_business_account_id
+INSTAGRAM_ACCESS_TOKEN=your_instagram_access_token
+```
+
+Railway-də eyni dəyərləri **Variables** bölməsinə əlavə edin və deploy-u restart edin.
+
+Secret-ləri `.env.example`, README və ya Git-ə commit etməyin. Real token/private key sızıbsa, onu revoke/rotate edin.
+
+---
+
+## API Canvas / Postman Setup
+
+API canvas və ya Postman-da request hazırlayanda aşağıdakı ardıcıllıqdan istifadə edin.
+
+**Query Params:**
+- Əgər endpoint ayrıca query param tələb etmirsə, bu hissəni boş saxlayın.
+- Məsələn `/api/firebase/posts` üçün `status=all`, `/api/firebase/leads` üçün `min_score=60` və `source=linkedin` əlavə edə bilərsiniz.
+
+**Env Variables:**
+Bu hissəyə real dəyərləri əlavə edin. Açar adları belə olmalıdır:
+
+```env
+GEMINI_API_KEY=your_google_ai_studio_key
+GEMINI_MODEL=gemini-2.0-flash
+
+LINKEDIN_ACCESS_TOKEN=your_linkedin_access_token
+LINKEDIN_ORGANIZATION_ID=your_linkedin_organization_id
+LINKEDIN_USE_PERSONAL_PROFILE=true
+LINKEDIN_PERSONAL_PROFILE_ID=your_personal_profile_id
+LINKEDIN_PERSONAL_PROFILE_URN=urn:li:person:your_personal_profile_id
+
+DB_BACKEND=firebase
+FIREBASE_PROJECT_ID=your_firebase_project_id
+FIREBASE_DATABASE_ID=leads
+FIREBASE_CLIENT_EMAIL=your_firebase_client_email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+**Qeyd:** Env variables request body və query params kimi göndərilmir. Onlar lokalda `.env` faylında, production-da isə Railway Variables bölməsində saxlanılır. API server restart edilmədən yeni env dəyərləri oxunmaya bilər.
+
+---
+
 ## API Endpoints
 
 ### 1. **Health Check**
@@ -248,6 +321,189 @@ curl -X POST http://127.0.0.1:8890/api/llm/generate-linkedin-post \
 - `503` - Gemini istifadə edilə bilmir. `GEMINI_API_KEY` və `GEMINI_BASE_URL` ayarlarını yoxlayın
 - `502` - LLM post generasiya edə bilmədi
 - `500` - Sunucu hatası
+
+---
+
+### Facebook Page API-ləri
+
+Bu endpoint-lər Meta Graph API ilə Facebook Page üzərində işləyir. Lazım olan env-lər:
+
+```env
+META_GRAPH_VERSION=v23.0
+FACEBOOK_PAGE_ID=your_page_id
+FACEBOOK_PAGE_ACCESS_TOKEN=your_page_access_token
+```
+
+Page access token adətən Page üzərində content yaratmaq və engagement oxumaq üçün uyğun Meta permissions tələb edir, məsələn `pages_manage_posts`, `pages_read_engagement`, `pages_manage_engagement`.
+
+#### Facebook Page Info
+
+```bash
+curl http://127.0.0.1:8890/api/facebook/page
+```
+
+#### Facebook Page Posts Oxu
+
+```bash
+curl "http://127.0.0.1:8890/api/facebook/posts?limit=10"
+```
+
+#### Facebook Text/Link Post
+
+Dry-run, təhlükəsiz test:
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/facebook/post \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Testing Facebook Page API",
+    "link": "https://example.com",
+    "dry_run": true
+  }'
+```
+
+Real publish:
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/facebook/post \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Testing Facebook Page API",
+    "link": "https://example.com"
+  }'
+```
+
+#### Facebook Photo Post
+
+`image_url` public reachable URL olmalıdır.
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/facebook/photo \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://example.com/image.jpg",
+    "caption": "Photo caption",
+    "dry_run": true
+  }'
+```
+
+#### Facebook Comment
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/facebook/comment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object_id": "facebook_post_or_photo_id",
+    "content": "Great point",
+    "dry_run": true
+  }'
+```
+
+#### Facebook Reaction
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/facebook/react \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object_id": "facebook_post_or_photo_id",
+    "type": "LIKE",
+    "dry_run": true
+  }'
+```
+
+#### Facebook Comments/Reactions Oxu
+
+```bash
+curl "http://127.0.0.1:8890/api/facebook/comments/facebook_object_id?limit=25"
+curl "http://127.0.0.1:8890/api/facebook/reactions/facebook_object_id?limit=25"
+```
+
+---
+
+### Instagram Graph API-ləri
+
+Bu endpoint-lər Instagram Business/Creator account üçün Meta Graph API istifadə edir. Lazım olan env-lər:
+
+```env
+META_GRAPH_VERSION=v23.0
+INSTAGRAM_BUSINESS_ACCOUNT_ID=your_ig_user_id
+INSTAGRAM_ACCESS_TOKEN=your_access_token
+```
+
+`INSTAGRAM_ACCESS_TOKEN` boş saxlanılsa app `FACEBOOK_PAGE_ACCESS_TOKEN` dəyərindən fallback kimi istifadə edir. Content publishing üçün adətən Instagram account Facebook Page-ə bağlı olmalı və token `instagram_content_publish` kimi uyğun permission-lara sahib olmalıdır.
+
+#### Instagram Profile
+
+```bash
+curl http://127.0.0.1:8890/api/instagram/profile
+```
+
+#### Instagram Media Oxu
+
+```bash
+curl "http://127.0.0.1:8890/api/instagram/media?limit=10"
+```
+
+#### Instagram Image Publish
+
+Instagram publish iki addımlıdır: media container yaradılır, sonra `media_publish` çağırılır. Bu endpoint ikisini də edir.
+
+`image_url` public reachable URL olmalıdır.
+
+Dry-run:
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/instagram/image \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://example.com/image.jpg",
+    "caption": "Instagram caption",
+    "dry_run": true
+  }'
+```
+
+Real publish:
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/instagram/image \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://example.com/image.jpg",
+    "caption": "Instagram caption"
+  }'
+```
+
+#### Instagram Reel Publish
+
+`video_url` public reachable MP4 URL olmalıdır.
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/instagram/reel \
+  -H "Content-Type: application/json" \
+  -d '{
+    "video_url": "https://example.com/video.mp4",
+    "caption": "Reel caption",
+    "dry_run": true
+  }'
+```
+
+#### Instagram Comment
+
+```bash
+curl -X POST http://127.0.0.1:8890/api/instagram/comment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "media_id": "instagram_media_id",
+    "content": "Nice post",
+    "dry_run": true
+  }'
+```
+
+#### Instagram Comments Oxu
+
+```bash
+curl "http://127.0.0.1:8890/api/instagram/comments/instagram_media_id?limit=25"
+```
 
 ---
 

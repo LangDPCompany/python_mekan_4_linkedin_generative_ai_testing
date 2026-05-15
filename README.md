@@ -8,6 +8,8 @@ AI-powered LinkedIn automation system for lead generation.
 - Score and process leads
 - Generate AI responses
 - Automated LinkedIn content posting (articles, posts)
+- Facebook Page posting, photo publishing, comments, and reactions via Meta Graph API
+- Instagram Business image/Reel publishing and comments via Instagram Graph API
 - Engagement with posts (comments, likes)
 - Feedback handling on own content
 - Time-based scheduling
@@ -18,6 +20,8 @@ AI-powered LinkedIn automation system for lead generation.
 2. Set environment variables (see config.py)
 	- For personal profile posting, set `LINKEDIN_USE_PERSONAL_PROFILE=true`
 	- Optionally set `LINKEDIN_PERSONAL_PROFILE_ID` or `LINKEDIN_PERSONAL_PROFILE_URN`
+	- For Facebook Page APIs, set `FACEBOOK_PAGE_ID` and `FACEBOOK_PAGE_ACCESS_TOKEN`
+	- For Instagram APIs, set `INSTAGRAM_BUSINESS_ACCOUNT_ID` and `INSTAGRAM_ACCESS_TOKEN`
 	- For Firestore storage, set the Firebase Admin SDK variables listed in `FIREBASE_SETUP.md`
 3. Run the pipeline safely: `python main.py run --sources linkedin --dry-run`
 4. To auto-publish generated LinkedIn content, set `APPROVAL_MODE=AUTO_POST`.
@@ -51,3 +55,27 @@ Default Firestore target:
 - `status=post_failed` when LinkedIn rejects the post
 
 See `FIREBASE_SETUP.md` for the required Firebase variables.
+
+## Meta API Endpoints
+
+Facebook:
+
+- `GET /api/facebook/page`
+- `GET /api/facebook/posts`
+- `POST /api/facebook/post`
+- `POST /api/facebook/photo`
+- `POST /api/facebook/comment`
+- `POST /api/facebook/react`
+- `GET /api/facebook/comments/<object_id>`
+- `GET /api/facebook/reactions/<object_id>`
+
+Instagram:
+
+- `GET /api/instagram/profile`
+- `GET /api/instagram/media`
+- `POST /api/instagram/image`
+- `POST /api/instagram/reel`
+- `POST /api/instagram/comment`
+- `GET /api/instagram/comments/<media_id>`
+
+Use `"dry_run": true` in POST bodies to validate payloads without publishing.

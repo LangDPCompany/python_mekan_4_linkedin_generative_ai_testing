@@ -9,6 +9,7 @@ from ingestion import IngestionOrchestrator
 from ai_engine import GeminiEngine
 from crm import CRMDatabase, STATUS_PENDING
 from linkedin_client import LinkedInClient
+from meta_client import FacebookClient, InstagramClient
 from content_scheduler import ContentScheduler
 
 # Initialize Flask app for API endpoints
@@ -260,6 +261,17 @@ def api_index():
             "linkedin_like": "POST /api/linkedin/like",
             "linkedin_comments_read": "GET /api/linkedin/comments/<post_id>",
             "linkedin_likes_read": "GET /api/linkedin/likes/<post_id>",
+            "facebook_page": "GET /api/facebook/page",
+            "facebook_posts": "GET /api/facebook/posts",
+            "facebook_post": "POST /api/facebook/post",
+            "facebook_photo": "POST /api/facebook/photo",
+            "facebook_comment": "POST /api/facebook/comment",
+            "facebook_react": "POST /api/facebook/react",
+            "instagram_profile": "GET /api/instagram/profile",
+            "instagram_media": "GET /api/instagram/media",
+            "instagram_image": "POST /api/instagram/image",
+            "instagram_reel": "POST /api/instagram/reel",
+            "instagram_comment": "POST /api/instagram/comment",
             "firebase_leads": "GET /api/firebase/leads",
             "firebase_lead_detail": "GET|PATCH|DELETE /api/firebase/leads/<lead_id>",
             "firebase_posts": "GET /api/firebase/posts",
@@ -483,6 +495,369 @@ def api_linkedin_read_likes(post_id: str):
         return json_error(str(e), 500)
 
 
+# ═════════════════════════════════════════════════════════════════════════
+#  API ENDPOINTS FOR FACEBOOK PAGES
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/facebook/page", methods=["GET"])
+def api_facebook_page():
+    try:
+        client = FacebookClient()
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        page = client.get_page()
+        if page:
+            return jsonify({"success": True, "page": page}), 200
+        return json_error("Failed to fetch Facebook Page", 502, facebook_error=client.last_error)
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/page: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/posts", methods=["GET"])
+def api_facebook_posts():
+    try:
+        limit = request.args.get("limit", default=25, type=int)
+        client = FacebookClient()
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        posts = client.fetch_posts(limit=limit)
+        return jsonify({"success": True, "count": len(posts), "posts": posts}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/posts: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/post", methods=["POST"])
+def api_facebook_post():
+    try:
+        data = get_json_body()
+        message = data.get("content") or data.get("message")
+        link = data.get("link")
+        if not message or not str(message).strip():
+            return json_error("Missing 'content' or 'message' field", 400)
+
+        client = FacebookClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({
+                "success": True,
+                "dry_run": True,
+                "message": "Facebook post payload prepared. Nothing was published.",
+                "payload": client.prepare_post_payload(message, link),
+            }), 200
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+
+        post_id = client.post_feed(message, link=link)
+        if post_id:
+            record = CRMDatabase().add_social_post_record(
+                platform="facebook",
+                endpoint="/api/facebook/post",
+                action="manual_facebook_post",
+                content=message,
+                status="posted",
+                external_id=post_id,
+                extra_metadata={"link": link},
+            )
+            return jsonify({
+                "success": True,
+                "post_id": post_id,
+                "firebase_record": record,
+                "message": "Post shared successfully on Facebook",
+            }), 201
+        record = CRMDatabase().add_social_post_record(
+            platform="facebook",
+            endpoint="/api/facebook/post",
+            action="manual_facebook_post",
+            content=message,
+            status="post_failed",
+            error=client.last_error,
+            extra_metadata={"link": link},
+        )
+        return json_error("Failed to post on Facebook", 502, facebook_error=client.last_error, firebase_record=record)
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/post: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/photo", methods=["POST"])
+def api_facebook_photo():
+    try:
+        data = get_json_body()
+        image_url = data.get("image_url")
+        caption = data.get("caption", "")
+        if not image_url:
+            return json_error("Missing 'image_url' field", 400)
+
+        client = FacebookClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({
+                "success": True,
+                "dry_run": True,
+                "message": "Facebook photo payload prepared. Nothing was published.",
+                "payload": client.prepare_photo_payload(image_url, caption),
+            }), 200
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+
+        photo_id = client.post_photo(image_url, caption)
+        if photo_id:
+            record = CRMDatabase().add_social_post_record(
+                platform="facebook",
+                endpoint="/api/facebook/photo",
+                action="manual_facebook_photo",
+                content=caption,
+                status="posted",
+                external_id=photo_id,
+                extra_metadata={"image_url": image_url},
+            )
+            return jsonify({"success": True, "photo_id": photo_id, "firebase_record": record}), 201
+        record = CRMDatabase().add_social_post_record(
+            platform="facebook",
+            endpoint="/api/facebook/photo",
+            action="manual_facebook_photo",
+            content=caption,
+            status="post_failed",
+            error=client.last_error,
+            extra_metadata={"image_url": image_url},
+        )
+        return json_error("Failed to post Facebook photo", 502, facebook_error=client.last_error, firebase_record=record)
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/photo: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/comment", methods=["POST"])
+def api_facebook_comment():
+    try:
+        data = get_json_body()
+        object_id = data.get("object_id") or data.get("post_id")
+        message = data.get("content") or data.get("message")
+        if not object_id or not message:
+            return json_error("Missing 'object_id'/'post_id' or 'content'/'message'", 400)
+        client = FacebookClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({"success": True, "dry_run": True, "object_id": object_id, "message": message}), 200
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        comment_id = client.post_comment(object_id, message)
+        if comment_id:
+            return jsonify({"success": True, "comment_id": comment_id}), 201
+        return json_error("Failed to post Facebook comment", 502, facebook_error=client.last_error)
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/comment: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/react", methods=["POST"])
+def api_facebook_react():
+    try:
+        data = get_json_body()
+        object_id = data.get("object_id") or data.get("post_id")
+        reaction_type = data.get("type", "LIKE")
+        if not object_id:
+            return json_error("Missing 'object_id' or 'post_id'", 400)
+        client = FacebookClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({"success": True, "dry_run": True, "object_id": object_id, "type": reaction_type}), 200
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        if client.react(object_id, reaction_type):
+            return jsonify({"success": True, "message": "Reaction sent successfully"}), 200
+        return json_error("Failed to react on Facebook", 502, facebook_error=client.last_error)
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/react: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/comments/<path:object_id>", methods=["GET"])
+def api_facebook_comments(object_id: str):
+    try:
+        limit = request.args.get("limit", default=25, type=int)
+        client = FacebookClient()
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        comments = client.fetch_comments(object_id, limit=limit)
+        return jsonify({"success": True, "count": len(comments), "comments": comments}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/comments/{object_id}: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/facebook/reactions/<path:object_id>", methods=["GET"])
+def api_facebook_reactions(object_id: str):
+    try:
+        limit = request.args.get("limit", default=25, type=int)
+        client = FacebookClient()
+        if not client.api_available:
+            return json_error("Facebook API not available. Set FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN.", 503)
+        reactions = client.fetch_reactions(object_id, limit=limit)
+        return jsonify({"success": True, "count": len(reactions), "reactions": reactions}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/facebook/reactions/{object_id}: {e}")
+        return json_error(str(e), 500)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+#  API ENDPOINTS FOR INSTAGRAM BUSINESS / CREATOR ACCOUNTS
+# ═════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/instagram/profile", methods=["GET"])
+def api_instagram_profile():
+    try:
+        client = InstagramClient()
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        profile = client.get_profile()
+        if profile:
+            return jsonify({"success": True, "profile": profile}), 200
+        return json_error("Failed to fetch Instagram profile", 502, instagram_error=client.last_error)
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/profile: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/instagram/media", methods=["GET"])
+def api_instagram_media():
+    try:
+        limit = request.args.get("limit", default=25, type=int)
+        client = InstagramClient()
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        media = client.fetch_media(limit=limit)
+        return jsonify({"success": True, "count": len(media), "media": media}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/media: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/instagram/image", methods=["POST"])
+@app.route("/api/instagram/media", methods=["POST"])
+def api_instagram_image():
+    try:
+        data = get_json_body()
+        image_url = data.get("image_url")
+        caption = data.get("caption", "")
+        if not image_url:
+            return json_error("Missing 'image_url' field", 400)
+        client = InstagramClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({
+                "success": True,
+                "dry_run": True,
+                "message": "Instagram image payload prepared. Nothing was published.",
+                "payload": client.prepare_media_payload(caption=caption, image_url=image_url),
+            }), 200
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        result = client.publish_image(image_url=image_url, caption=caption)
+        if result:
+            record = CRMDatabase().add_social_post_record(
+                platform="instagram",
+                endpoint="/api/instagram/image",
+                action="manual_instagram_image",
+                content=caption,
+                status="posted",
+                external_id=result.get("media_id"),
+                extra_metadata={"image_url": image_url, "creation_id": result.get("creation_id")},
+            )
+            return jsonify({"success": True, **result, "firebase_record": record}), 201
+        record = CRMDatabase().add_social_post_record(
+            platform="instagram",
+            endpoint="/api/instagram/image",
+            action="manual_instagram_image",
+            content=caption,
+            status="post_failed",
+            error=client.last_error,
+            extra_metadata={"image_url": image_url},
+        )
+        return json_error("Failed to publish Instagram image", 502, instagram_error=client.last_error, firebase_record=record)
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/image: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/instagram/reel", methods=["POST"])
+def api_instagram_reel():
+    try:
+        data = get_json_body()
+        video_url = data.get("video_url")
+        caption = data.get("caption", "")
+        if not video_url:
+            return json_error("Missing 'video_url' field", 400)
+        client = InstagramClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({
+                "success": True,
+                "dry_run": True,
+                "message": "Instagram Reel payload prepared. Nothing was published.",
+                "payload": client.prepare_media_payload(caption=caption, video_url=video_url, media_type="REELS"),
+            }), 200
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        result = client.publish_reel(video_url=video_url, caption=caption)
+        if result:
+            record = CRMDatabase().add_social_post_record(
+                platform="instagram",
+                endpoint="/api/instagram/reel",
+                action="manual_instagram_reel",
+                content=caption,
+                status="posted",
+                external_id=result.get("media_id"),
+                extra_metadata={"video_url": video_url, "creation_id": result.get("creation_id")},
+            )
+            return jsonify({"success": True, **result, "firebase_record": record}), 201
+        record = CRMDatabase().add_social_post_record(
+            platform="instagram",
+            endpoint="/api/instagram/reel",
+            action="manual_instagram_reel",
+            content=caption,
+            status="post_failed",
+            error=client.last_error,
+            extra_metadata={"video_url": video_url},
+        )
+        return json_error("Failed to publish Instagram Reel", 502, instagram_error=client.last_error, firebase_record=record)
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/reel: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/instagram/comment", methods=["POST"])
+def api_instagram_comment():
+    try:
+        data = get_json_body()
+        media_id = data.get("media_id")
+        message = data.get("content") or data.get("message")
+        if not media_id or not message:
+            return json_error("Missing 'media_id' or 'content'/'message'", 400)
+        client = InstagramClient()
+        if bool(data.get("dry_run", False)):
+            return jsonify({"success": True, "dry_run": True, "media_id": media_id, "message": message}), 200
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        comment_id = client.post_comment(media_id, message)
+        if comment_id:
+            return jsonify({"success": True, "comment_id": comment_id}), 201
+        return json_error("Failed to post Instagram comment", 502, instagram_error=client.last_error)
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/comment: {e}")
+        return json_error(str(e), 500)
+
+
+@app.route("/api/instagram/comments/<path:media_id>", methods=["GET"])
+def api_instagram_comments(media_id: str):
+    try:
+        limit = request.args.get("limit", default=25, type=int)
+        client = InstagramClient()
+        if not client.api_available:
+            return json_error("Instagram API not available. Set INSTAGRAM_BUSINESS_ACCOUNT_ID and INSTAGRAM_ACCESS_TOKEN.", 503)
+        comments = client.fetch_comments(media_id, limit=limit)
+        return jsonify({"success": True, "count": len(comments), "comments": comments}), 200
+    except Exception as e:
+        logger.error(f"API error in /api/instagram/comments/{media_id}: {e}")
+        return json_error(str(e), 500)
+
+
 @app.route("/api/firebase/leads", methods=["GET"])
 def api_firebase_list_leads():
     """Read leads from Firebase Firestore."""
@@ -632,9 +1007,13 @@ def api_health():
     """Health check endpoint."""
     try:
         linkedin_client = LinkedInClient()
+        facebook_client = FacebookClient()
+        instagram_client = InstagramClient()
         return jsonify({
             "status": "healthy",
             "linkedin_api_available": linkedin_client.api_available,
+            "facebook_api_available": facebook_client.api_available,
+            "instagram_api_available": instagram_client.api_available,
             "approval_mode": config.APPROVAL_MODE
         }), 200
     except Exception as e:
@@ -712,6 +1091,13 @@ def run_api_server(host: str = "127.0.0.1", port: int = 5000):
     logger.info("  POST /api/linkedin/like               - Like a post on LinkedIn")
     logger.info("  GET  /api/linkedin/comments/<post_id> - Read LinkedIn comments")
     logger.info("  GET  /api/linkedin/likes/<post_id>    - Read LinkedIn like count")
+    logger.info("  POST /api/facebook/post              - Post text/link on Facebook Page")
+    logger.info("  POST /api/facebook/photo             - Post photo on Facebook Page")
+    logger.info("  POST /api/facebook/comment           - Comment on Facebook object")
+    logger.info("  POST /api/facebook/react             - React to Facebook object")
+    logger.info("  POST /api/instagram/image            - Publish Instagram image")
+    logger.info("  POST /api/instagram/reel             - Publish Instagram Reel")
+    logger.info("  POST /api/instagram/comment          - Comment on Instagram media")
     logger.info("  GET  /api/firebase/leads              - Read stored leads")
     logger.info("  GET  /api/firebase/posts              - Read stored/generated posts")
     logger.info("  POST /api/llm/generate-linkedin-post  - Generate post from topic (LLM)")

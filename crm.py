@@ -113,25 +113,48 @@ class CRMDatabase:
         share_urn: Optional[str] = None,
         error: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, str]:
+        return self.add_social_post_record(
+            platform="linkedin",
+            endpoint="/api/linkedin/post",
+            action="manual_linkedin_post",
+            content=content,
+            status=status,
+            external_id=share_urn,
+            error=error,
+        )
+
+    def add_social_post_record(
+        self,
+        platform: str,
+        endpoint: str,
+        action: str,
+        content: str,
+        status: str,
+        external_id: Optional[str] = None,
+        error: Optional[Dict[str, Any]] = None,
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
         now = _now()
         lead_ref = self.leads.document()
         platform_metadata = {
-            "endpoint": "/api/linkedin/post",
-            "share_urn": share_urn,
+            "endpoint": endpoint,
+            "external_id": external_id,
             "error": error,
         }
+        if extra_metadata:
+            platform_metadata.update(extra_metadata)
         lead_ref.set({
             "text": content,
             "cleaned_text": content,
-            "source": "linkedin",
-            "author": "api/linkedin/post",
+            "source": platform,
+            "author": endpoint,
             "url": "",
             "timestamp": now,
             "score": 0,
             "intent_level": "manual_post",
             "is_lead": False,
             "signals": {},
-            "recommended_action": "manual_linkedin_post",
+            "recommended_action": action,
             "ai_response": None,
             "status": status,
             "platform_metadata": platform_metadata,
@@ -141,7 +164,7 @@ class CRMDatabase:
         queue_ref = self.review_queue.document()
         queue_ref.set({
             "lead_id": lead_ref.id,
-            "action": "manual_linkedin_post",
+            "action": action,
             "content": content,
             "status": status,
             "platform_metadata": platform_metadata,
